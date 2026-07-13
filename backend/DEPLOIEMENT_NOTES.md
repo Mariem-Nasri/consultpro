@@ -33,7 +33,7 @@ Puis uploader `whisper-dental-fr-final-ct2/` sur le VPS, par exemple dans
 export CONSULTPRO_WHISPER_MODEL_PATH=/var/consultpro/models/whisper-dental-fr-final-ct2
 export CONSULTPRO_ASR_DEVICE=cpu
 export CONSULTPRO_ASR_COMPUTE_TYPE=int8
-export CONSULTPRO_ASR_CPU_THREADS=2   # = nombre de vCPU du plan KVM 2
+export CONSULTPRO_ASR_CPU_THREADS=2
 export CONSULTPRO_UPLOAD_DIR=/var/consultpro/uploads
 ```
 

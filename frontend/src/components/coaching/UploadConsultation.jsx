@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { Upload, Loader2, AlertCircle } from "lucide-react";
 import ResultsDashboard from "./ResultsDashboard";
 
-const API_BASE = "/api/analysis"; // adapte si ton backend est sur un autre host
+const API_BASE = `${import.meta.env.VITE_API_URL || ""}/api/analysis`; 
 
 const POLL_INTERVAL_MS = 4000;
 

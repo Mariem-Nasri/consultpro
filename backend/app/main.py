@@ -50,9 +50,9 @@ app = FastAPI(title="ConsultPro API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",
-        "https://dentalteams.fr",  # ton domaine Vercel affilié, si le frontend y est aussi servi
-    ],
+    "http://localhost:5173",
+    "https://consult-pro-praticien.vercel.app",
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
