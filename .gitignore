@@ -1,0 +1,32 @@
+# ── Backend Python ──────────────────────────────────
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ── Frontend Node ───────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── Modèles (trop volumineux pour Git, à héberger ailleurs) ──
+model/
+*.bin
+*.safetensors
+whisper-dental-fr-final-ct2/
+
+# ── Config sensible ──────────────────────────────────
+.env
+.env.local
+backend/.env
+
+# ── Éditeurs / OS ────────────────────────────────────
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ── Logs ─────────────────────────────────────────────
+*.log
+npm-debug.log*
