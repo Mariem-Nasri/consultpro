@@ -50,10 +50,10 @@ if (-not (Test-Path $DepsMarker)) {
 New-Item -ItemType Directory -Force -Path (Join-Path $BackendDir "uploads") | Out-Null
 
 # ── 2. Variables d'environnement (test local, modele fine-tune) ──
-if (-not $env:CONSULTPRO_WHISPER_MODEL_PATH) { $env:CONSULTPRO_WHISPER_MODEL_PATH = "C:\consultpro\model\whisper-dental-fr-final-ct2" }
-if (-not $env:CONSULTPRO_ASR_DEVICE)         { $env:CONSULTPRO_ASR_DEVICE = "cpu" }
-if (-not $env:CONSULTPRO_ASR_COMPUTE_TYPE)    { $env:CONSULTPRO_ASR_COMPUTE_TYPE = "int8" }
-if (-not $env:CONSULTPRO_ASR_CPU_THREADS)     { $env:CONSULTPRO_ASR_CPU_THREADS = "2" }
+if (-not $env:CONSULTPRO_WHISPER_MODEL_PATH) { $env:CONSULTPRO_WHISPER_MODEL_PATH = Join-Path $RootDir "model\whisper-dental-fr-final-ct2" }
+if (-not $env:CONSULTPRO_ASR_DEVICE)         { $env:CONSULTPRO_ASR_DEVICE = "cuda" }
+if (-not $env:CONSULTPRO_ASR_COMPUTE_TYPE)    { $env:CONSULTPRO_ASR_COMPUTE_TYPE = "float16" }
+if (-not $env:CONSULTPRO_ASR_CPU_THREADS)     { $env:CONSULTPRO_ASR_CPU_THREADS = "0" }
 if (-not $env:CONSULTPRO_UPLOAD_DIR)          { $env:CONSULTPRO_UPLOAD_DIR = Join-Path $BackendDir "uploads" }
 
 Write-Host ""

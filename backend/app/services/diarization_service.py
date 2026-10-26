@@ -14,6 +14,22 @@ Différences par rapport au notebook :
 - Retourne un dict Python (équivalent de report.json) au lieu d'écrire des
   fichiers de rapport.
 
+MODIF (intégration coaching praticien — phonétique/diction) :
+- `_compute_segment_embedding` retourne maintenant un tuple
+  (embedding, features) au lieu d'un simple vecteur. `features` contient
+  pitch_std et energy_mean, déjà calculés pour le clustering mais jusque-là
+  jetés après usage.
+- Chaque segment du report final porte désormais :
+    - "pitch_std"             : variation du ton (voix monotone / tremblante)
+    - "energy_mean"           : intensité vocale moyenne (log-énergie)
+    - "debit_mots_par_sec"    : débit de parole, calculé après transcription
+  Ces trois champs alimentent coaching_service.py pour couvrir l'axe
+  "phonétique et diction" du cahier des charges (débit, articulation
+  indirecte via variation de ton), qui n'était pas exposé auparavant.
+- `_merge_consecutive` moyenne pitch_std/energy_mean au prorata de la durée
+  quand deux segments consécutifs du même locuteur sont fusionnés, au lieu
+  de garder arbitrairement les valeurs du premier segment.
+
 IMPORTANT — conversion du modèle :
 `whisper-dental-fr-final` est un modèle HuggingFace fine-tuné. Pour l'utiliser
 avec faster-whisper, il doit d'abord être converti au format CTranslate2 :
@@ -79,16 +95,11 @@ KEYWORDS_PATIENT = [
 _asr_model = None
 
 
-def load_asr_model(model_path: str, device: str = "cpu", compute_type: str = "int8", cpu_threads: int = 0):
+def load_asr_model(model_path: str, device: str = "cuda", compute_type: str = "float16", cpu_threads: int = 0):
     """
-    A appeler UNE FOIS au démarrage de FastAPI (voir main.py -> lifespan).
-
-    :param model_path: chemin vers le modèle converti au format CTranslate2
-                        (voir docstring du module pour la commande de conversion)
-    :param device: "cpu" sur un VPS Hostinger KVM sans GPU
-    :param compute_type: "int8" = bon compromis vitesse/précision sur CPU
-    :param cpu_threads: 0 = laisse CTranslate2 déterminer automatiquement
-                         (sinon fixer au nb de vCPU du VPS, ex: 2)
+    Charge le modèle Whisper en priorité sur GPU, avec fallback CPU si nécessaire.
+    Cela évite de rester bloqué sur un environnement sans CUDA alors que le PC
+    a bien une carte graphique disponible.
     """
     global _asr_model
     if _asr_model is not None:
@@ -96,20 +107,61 @@ def load_asr_model(model_path: str, device: str = "cpu", compute_type: str = "in
 
     from faster_whisper import WhisperModel
 
-    _asr_model = WhisperModel(
-        model_path,
-        device=device,
-        compute_type=compute_type,
-        cpu_threads=cpu_threads,
-    )
-    return _asr_model
+    candidate_devices = [device] if device else ["cuda", "cpu"]
+    if "cuda" not in candidate_devices and "auto" not in candidate_devices and "cpu" not in candidate_devices:
+        candidate_devices = [device, "cuda", "cpu"]
+    elif "auto" in candidate_devices:
+        candidate_devices = ["cuda", "cpu"]
+
+    last_error = None
+    for candidate in candidate_devices:
+        try:
+            _asr_model = WhisperModel(
+                model_path,
+                device=candidate,
+                compute_type=compute_type if candidate == "cuda" else (compute_type if compute_type in {"int8", "float16"} else "int8"),
+                cpu_threads=cpu_threads if candidate == "cpu" else 0,
+            )
+            print(f"✅ WhisperModel chargé sur device={candidate} (compute_type={compute_type})")
+            return _asr_model
+        except Exception as exc:  # pragma: no cover - dépend de l'environnement GPU/CPU
+            last_error = exc
+            print(f"⚠️ Chargement Whisper sur {candidate} impossible : {exc}")
+
+    raise RuntimeError(f"Impossible de charger le modèle Whisper sur {candidate_devices}.") from last_error
 
 
 def _transcribe(wav_path: str) -> str:
     if _asr_model is None:
         raise RuntimeError("Modèle ASR non chargé — appelle load_asr_model() au démarrage.")
-    segments, _info = _asr_model.transcribe(wav_path, language="fr", beam_size=1)
+    segments, _info = _asr_model.transcribe(wav_path, language="fr", beam_size=1, vad_filter=True)
     return " ".join(seg.text.strip() for seg in segments).strip()
+
+
+def _transcribe_full_audio(audio_path: str) -> list[dict]:
+    """Transcrit tout le fichier une seule fois et renvoie les segments de temps."""
+    if _asr_model is None:
+        raise RuntimeError("Modèle ASR non chargé — appelle load_asr_model() au démarrage.")
+
+    segments, _info = _asr_model.transcribe(
+        audio_path,
+        language="fr",
+        beam_size=1,
+        vad_filter=True,
+        word_timestamps=False,
+    )
+
+    result = []
+    for seg in segments:
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        result.append({
+            "start": float(seg.start),
+            "end": float(seg.end),
+            "text": text,
+        })
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -144,9 +196,16 @@ def _segment_by_silence(y, sr, threshold_db, min_silence_ms, min_segment_ms):
 
 
 def _compute_segment_embedding(y_seg, sr, n_mfcc=40, n_mels=80):
+    """
+    Retourne (embedding, features) :
+    - embedding : vecteur utilisé pour le clustering (inchangé)
+    - features  : dict avec pitch_std et energy_mean, exposés pour le
+                  coaching praticien (axe phonétique/diction).
+      Retourne (None, None) si le segment est trop court.
+    """
     hop = 160
     if len(y_seg) < hop * 4:
-        return None
+        return None, None
 
     mfcc = librosa.feature.mfcc(y=y_seg, sr=sr, n_mfcc=n_mfcc, n_mels=n_mels, hop_length=hop, n_fft=512)
     d1 = librosa.feature.delta(mfcc)
@@ -167,12 +226,19 @@ def _compute_segment_embedding(y_seg, sr, n_mfcc=40, n_mels=80):
     rms = librosa.feature.rms(y=y_seg, hop_length=hop)[0]
     log_e = np.log(rms + 1e-10)
 
-    return np.concatenate([
+    embedding = np.concatenate([
         mfcc.mean(1), mfcc.std(1),
         d1.mean(1), d1.std(1),
         [f0_mean, f0_std, f0_med, voiced_ratio],
         [log_e.mean(), log_e.std()],
     ])
+
+    features = {
+        "pitch_std": float(f0_std),
+        "energy_mean": float(log_e.mean()),
+    }
+
+    return embedding, features
 
 
 def _cluster_embeddings(embs, n_spk):
@@ -184,12 +250,24 @@ def _cluster_embeddings(embs, n_spk):
 
 
 def _merge_consecutive(segments, merge_gap_ms):
+    """
+    Fusionne les segments consécutifs du même locuteur. Pour pitch_std et
+    energy_mean, moyenne pondérée par la durée plutôt que de garder
+    arbitrairement les valeurs du premier segment de la fusion.
+    """
     if not segments:
         return []
     merged = [segments[0].copy()]
     for seg in segments[1:]:
         prev = merged[-1]
         if prev["speaker_id"] == seg["speaker_id"] and seg["start_ms"] - prev["end_ms"] <= merge_gap_ms:
+            prev_dur = prev["duration_ms"]
+            seg_dur = seg["duration_ms"]
+            total_dur = prev_dur + seg_dur
+            if total_dur > 0:
+                for key in ("pitch_std", "energy_mean"):
+                    if key in prev and key in seg:
+                        prev[key] = (prev[key] * prev_dur + seg[key] * seg_dur) / total_dur
             prev["end_ms"] = seg["end_ms"]
             prev["duration_ms"] = prev["end_ms"] - prev["start_ms"]
         else:
@@ -257,12 +335,13 @@ def run_diarization_pipeline(audio_path: str, work_dir: str | None = None) -> di
     if len(speech_segments) < 4:
         raise ValueError("Pas assez de parole détectée dans l'audio — vérifier le fichier.")
 
-    embeddings, valid_segs = [], []
+    embeddings, valid_segs, seg_features = [], [], []
     for start_s, end_s in speech_segments:
-        emb = _compute_segment_embedding(audio_data[start_s:end_s], sr, N_MFCC, N_MELS)
+        emb, feats = _compute_segment_embedding(audio_data[start_s:end_s], sr, N_MFCC, N_MELS)
         if emb is not None:
             embeddings.append(emb)
             valid_segs.append((start_s, end_s))
+            seg_features.append(feats)
     embeddings = np.array(embeddings)
 
     seg_labels = _cluster_embeddings(embeddings, N_SPEAKERS)
@@ -272,26 +351,60 @@ def run_diarization_pipeline(audio_path: str, work_dir: str | None = None) -> di
         "start_ms": int(s / sr * 1000),
         "end_ms": int(e / sr * 1000),
         "duration_ms": int((e - s) / sr * 1000),
-    } for lbl, (s, e) in zip(seg_labels, valid_segs)]
+        "pitch_std": feats["pitch_std"],
+        "energy_mean": feats["energy_mean"],
+    } for lbl, (s, e), feats in zip(seg_labels, valid_segs, seg_features)]
 
     segments = _merge_consecutive(raw_segs, MERGE_GAP_MS)
 
-    # Export wav + transcription
-    for i, seg in enumerate(segments):
-        ss = int(seg["start_ms"] / 1000 * sr)
-        es = int(seg["end_ms"] / 1000 * sr)
-        chunk = audio_data[ss:es]
-        if len(chunk) == 0:
+    # On évite la transcription segment par segment qui est très coûteuse sur CPU.
+    # On transcrit le fichier entier une seule fois, puis on répartit le texte sur
+    # les segments de parole selon leur recouvrement temporel.
+    full_transcript = []
+    try:
+        full_transcript = _transcribe_full_audio(audio_path)
+    except Exception:
+        full_transcript = []
+
+    for seg in segments:
+        seg_start = seg["start_ms"] / 1000.0
+        seg_end = seg["end_ms"] / 1000.0
+        seg_text_parts = []
+
+        if full_transcript:
+            for chunk in full_transcript:
+                chunk_start = float(chunk["start"])
+                chunk_end = float(chunk["end"])
+                overlap = max(0.0, min(seg_end, chunk_end) - max(seg_start, chunk_start))
+                if overlap > 0.0:
+                    seg_text_parts.append(chunk["text"])
+            seg["text"] = " ".join(seg_text_parts).strip()
+        else:
             seg["text"] = ""
-            continue
-        wav_path = os.path.join(work_dir, f"{i+1:04d}_{seg['speaker_id']}.wav")
-        sf.write(wav_path, chunk, sr)
-        try:
-            seg["text"] = _transcribe(wav_path)
-        except Exception:
-            seg["text"] = ""
-        finally:
-            os.remove(wav_path)
+
+        if not seg["text"]:
+            # Fallback conservateur : transcription de la zone localisée, uniquement si
+            # le transcript global n'a rien donné pour ce segment.
+            ss = int(seg["start_ms"] / 1000 * sr)
+            es = int(seg["end_ms"] / 1000 * sr)
+            chunk = audio_data[ss:es]
+            if len(chunk) == 0:
+                seg["text"] = ""
+            else:
+                wav_path = os.path.join(work_dir, f"tmp_{uuid.uuid4().hex}.wav")
+                sf.write(wav_path, chunk, sr)
+                try:
+                    seg["text"] = _transcribe(wav_path)
+                except Exception:
+                    seg["text"] = ""
+                finally:
+                    if os.path.exists(wav_path):
+                        os.remove(wav_path)
+
+        n_words = len(seg["text"].split())
+        seg["debit_mots_par_sec"] = (
+            round(n_words / (seg["duration_ms"] / 1000), 2) if seg["duration_ms"] > 0 else 0.0
+        )
 
     if any(s.get("text", "").strip() for s in segments):
         role_map = _identify_roles(segments)

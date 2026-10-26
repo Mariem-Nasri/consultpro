@@ -18,19 +18,20 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.services.diarization_service import load_asr_model
 from app.routers.analysis_router import router as analysis_router
+from app.routers.auth_router import router as auth_router
+from app.services.database import initialize_database
 
-# ── Config modèle (à ajuster selon ton chemin réel sur le VPS) ────────────
-MODEL_PATH = os.environ.get(
-    "CONSULTPRO_WHISPER_MODEL_PATH",
-    "/var/consultpro/models/whisper-dental-fr-final-ct2",  # modèle converti CTranslate2
-)
-ASR_DEVICE = os.environ.get("CONSULTPRO_ASR_DEVICE", "cpu")       # "cpu" sur ton VPS KVM 2
-ASR_COMPUTE_TYPE = os.environ.get("CONSULTPRO_ASR_COMPUTE_TYPE", "int8")
-ASR_CPU_THREADS = int(os.environ.get("CONSULTPRO_ASR_CPU_THREADS", "2"))  # = nb vCPU du VPS
+# ── Config modèle : par défaut, utilise le modèle local du repo ──────────
+_DEFAULT_MODEL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "model", "whisper-dental-fr-final-ct2"))
+MODEL_PATH = os.environ.get("CONSULTPRO_WHISPER_MODEL_PATH", _DEFAULT_MODEL_PATH)
+ASR_DEVICE = os.environ.get("CONSULTPRO_ASR_DEVICE", "cuda")
+ASR_COMPUTE_TYPE = os.environ.get("CONSULTPRO_ASR_COMPUTE_TYPE", "float16")
+ASR_CPU_THREADS = int(os.environ.get("CONSULTPRO_ASR_CPU_THREADS", "0"))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    initialize_database()
     # ── Startup : charger le modèle Whisper UNE SEULE FOIS ────────────────
     print(f"⏳ Chargement du modèle Whisper depuis {MODEL_PATH} (device={ASR_DEVICE})...")
     load_asr_model(
@@ -65,6 +66,7 @@ app.add_middleware(
 
 # ── Nouveau router d'analyse audio ─────────────────────────────────────
 app.include_router(analysis_router)
+app.include_router(auth_router)
 
 
 @app.get("/api/health")

@@ -1,8 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { Upload, Loader2, AlertCircle } from "lucide-react";
 import ResultsDashboard from "./ResultsDashboard";
-
-const API_BASE = `${import.meta.env.VITE_API_URL || ""}/api/analysis`; 
+import { apiRequest } from "../../services/api";
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -17,8 +16,7 @@ export default function UploadConsultation() {
   const pollJob = useCallback((jobId) => {
     pollTimer.current = setInterval(async () => {
       try {
-        const res = await fetch(`${API_BASE}/${jobId}`);
-        const data = await res.json();
+        const data = await apiRequest(`/analysis/${jobId}`);
 
         if (data.status === "processing" || data.status === "pending") {
           setStatus(data.status);
@@ -51,12 +49,7 @@ export default function UploadConsultation() {
     formData.append("file", file);
 
     try {
-      const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: formData });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Échec de l'envoi du fichier.");
-      }
-      const data = await res.json();
+      const data = await apiRequest("/analysis/upload", { method: "POST", body: formData });
       setStatus("pending");
       pollJob(data.job_id);
     } catch (e) {

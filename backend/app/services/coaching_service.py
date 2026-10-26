@@ -12,6 +12,20 @@ que le notebook, mais :
   côté API si tu veux la garder légère) — réécrit en Python natif.
   Si tu préfères garder pandas (plus proche du notebook), c'est trivial
   à ré-adapter.
+
+MODIF (correctif axes d'amélioration + diction) :
+- BUG CORRIGÉ : `axes` ne vérifiait que 4 des 7 métriques calculées dans
+  `comm`. `empathie`, `interruptions` et `resistance_patient` étaient
+  calculées et affichées dans "points forts" quand elles étaient bonnes,
+  mais n'avaient jamais de contrepartie "axe d'amélioration" quand elles
+  étaient mauvaises (ex. Empathie=0% + Résistance=30% -> "rien à signaler").
+  Les 3 conditions manquantes sont ajoutées ci-dessous.
+- NOUVEAU : agrégation des indicateurs de diction (débit, variation de ton)
+  exposés par diarization_service.py sur chaque segment Médecin
+  (debit_mots_par_sec, pitch_std). Couvre l'axe "phonétique et diction"
+  du cahier des charges, jusque-là absent du coaching.
+  Le seuil sur pitch_std est indicatif — à calibrer avec de vraies données
+  de test avant de s'appuyer dessus en production.
 """
 
 import re
@@ -22,6 +36,11 @@ from collections import defaultdict
 def _pct_match(texts, pattern, scale=1.0):
     n = sum(1 for t in texts if re.search(pattern, t.lower()))
     return min(100, round(n / max(len(texts), 1) * 100 * scale))
+
+
+def _avg(values):
+    values = [v for v in values if v is not None]
+    return round(sum(values) / len(values), 2) if values else None
 
 
 def generate_coaching(report: dict) -> dict:
@@ -56,6 +75,9 @@ def generate_coaching(report: dict) -> dict:
             "end": round(end, 3),
             "duration": round(duration, 3),
             "text": seg.get("text", seg.get("transcript", "")),
+            "debit_mots_par_sec": seg.get("debit_mots_par_sec"),
+            "pitch_std": seg.get("pitch_std"),
+            "energy_mean": seg.get("energy_mean"),
         })
 
     total_duration = report.get("duration_s", max((r["end"] for r in rows), default=0))
@@ -96,6 +118,9 @@ def generate_coaching(report: dict) -> dict:
             pat_texts, r"\b(non|mais|pourtant|je refuse|jamais|trop cher)", 2.0),
         "max_segment_dur": round(max((r["duration"] for r in med_rows), default=0), 1),
         "nb_long_segments": sum(1 for r in med_rows if r["duration"] > 60),
+        # ── Diction (nouveau) ──────────────────────────────────────
+        "debit_moyen": _avg([r["debit_mots_par_sec"] for r in med_rows]),
+        "pitch_std_moyen": _avg([r["pitch_std"] for r in med_rows]),
     }
     comm["engagement_patient"] = min(100, max(
         20, 100 - comm["hesitations_patient"] - comm["resistance_patient"] // 2
@@ -162,6 +187,15 @@ def _make_coaching_report_text(comm, svs, stats, total_duration) -> str:
         f"  S4 Relationnel : {svs['S4_relationnel']}/100",
     ]
 
+    if comm.get("debit_moyen") is not None:
+        lines += [
+            "",
+            "DICTION (indicatif — seuils à calibrer)",
+            f"  Débit moyen    : {comm['debit_moyen']} mots/s",
+        ]
+        if comm.get("pitch_std_moyen") is not None:
+            lines.append(f"  Variation de ton : {comm['pitch_std_moyen']}")
+
     points_forts = []
     if comm["empathie"] >= 50:
         points_forts.append(f"Empathie verbale : {comm['empathie']}%")
@@ -186,6 +220,24 @@ def _make_coaching_report_text(comm, svs, stats, total_duration) -> str:
     if comm["hesitations_patient"] > 30:
         axes += [f"Hésitations patient : {comm['hesitations_patient']}%",
                  "  Vérifier la compréhension du plan de traitement"]
+    # ── Conditions manquantes ajoutées (bug corrigé) ────────────────
+    if comm["empathie"] < 30:
+        axes += [f"Empathie verbale {comm['empathie']}% -> viser 30%+",
+                 "  Ex : \"Je comprends que cela puisse être difficile...\""]
+    if comm["interruptions"] > 20:
+        axes += [f"Interruptions {comm['interruptions']}% -> laisser le patient terminer",
+                 "  Marquer une pause avant de répondre"]
+    if comm["resistance_patient"] > 25:
+        axes += [f"Résistance patient {comm['resistance_patient']}% -> explorer les réticences",
+                 "  Ex : \"Qu'est-ce qui vous inquiète dans ce traitement ?\""]
+    # ── Diction (nouveau, seuil indicatif) ───────────────────────────
+    if comm.get("debit_moyen") is not None and comm["debit_moyen"] > 4.0:
+        axes += [f"Débit rapide : {comm['debit_moyen']} mots/s -> ralentir",
+                 "  Marquer des pauses entre les phrases clés"]
+
+    if not axes:
+        axes = ["Rien à signaler sur cette consultation."]
+
     lines += ["", "AXES D'AMÉLIORATION"] + [f"  - {a}" for a in axes]
 
     return "\n".join(lines)

@@ -1,0 +1,11 @@
+export interface DemoResponse { message: string; }
+export type Role = "PRACTITIONER" | "ADMIN";
+export type AnalysisStatus = "uploaded" | "queued" | "processing" | "completed" | "failed";
+export interface SessionUser { id: string; name: string; email: string; role: Role; verified: boolean; }
+export interface TranscriptSegment { id: string; startSeconds: number; endSeconds: number; speaker: "PRACTITIONER" | "PATIENT"; text: string; tags: string[]; }
+export interface AnalysisResult { id: string; practitionerId: string; date: string; duration: string; status: AnalysisStatus; progress: number; modelVersion: string; communicationScore: number; openQuestions: number; closedQuestions: number; reformulation: number; activeListening: number; empathy: number; interruptions: number; speechRate: string; pauses: string; strengths: string[]; improvements: string[]; recommendations: string[]; suggestedQuestions: string[]; svs: { global: number; emotional: number; functional: number; systemic: number; relational: number }; transcript: TranscriptSegment[]; }
+export interface ConsultationSummary { id: string; date: string; duration: string; score: number; svs: number; status: string; patient: string; }
+export interface AnalysisStatusResponse { analysisId: string; status: AnalysisStatus; progress: number; currentStep: string; }
+export interface ReportSummary { id: string; analysisId: string; practitioner: string; date: string; modelVersion: string; status: "ready" | "generating" | "failed"; createdAt: string; }
+export interface AIAnalysisService { uploadAudio(input: { storageKey: string; mimeType: string }): Promise<{ jobId: string }>; startAnalysis(input: { jobId: string; analysisId: string }): Promise<void>; getAnalysisStatus(analysisId: string): Promise<AnalysisStatusResponse>; getAnalysisResults(analysisId: string): Promise<AnalysisResult>; }
+export interface ModelService { uploadModel(input: { name: string; version: string; type: string }): Promise<{ modelId: string }>; validateModel(modelId: string): Promise<void>; deployModel(modelId: string, environment: string): Promise<void>; getModelStatus(modelId: string): Promise<string>; rollbackModel(modelId: string): Promise<void>; }

@@ -1,5 +1,7 @@
 # ── Backend Python ──────────────────────────────────
 backend/venv/
+backend/venv_broken/
+backend/data/*.sqlite3
 backend/__pycache__/
 backend/**/__pycache__/
 *.pyc
@@ -21,6 +23,11 @@ whisper-dental-fr-final-ct2/
 .env
 .env.local
 backend/.env
+
+# Local recordings and generated app data
+consultation-coaching-167 (2)/.env
+consultation-coaching-167 (2)/storage/audio/*
+!consultation-coaching-167 (2)/storage/audio/.gitkeep
 
 # ── Éditeurs / OS ────────────────────────────────────
 .vscode/
