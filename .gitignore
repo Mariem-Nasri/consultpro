@@ -1,10 +1,19 @@
+
 # ── Backend Python ──────────────────────────────────
 backend/venv/
 backend/venv_broken/
 backend/data/*.sqlite3
 backend/__pycache__/
 backend/**/__pycache__/
+__pycache__/
+*.py[cod]
 *.pyc
+venv/
+.venv/
+env/
+ENV/
+
+# ── Backend uploads ─────────────────────────────────
 backend/uploads/*
 !backend/uploads/.gitkeep
 
@@ -19,17 +28,14 @@ model/
 *.safetensors
 whisper-dental-fr-final-ct2/
 
-# ── Config sensible ──────────────────────────────────
+# ── Config sensible ─────────────────────────────────
 .env
-.env.local
+.env.*
+!.env.example
+!.env.sample
 backend/.env
 
-# Local recordings and generated app data
-consultation-coaching-167 (2)/.env
-consultation-coaching-167 (2)/storage/audio/*
-!consultation-coaching-167 (2)/storage/audio/.gitkeep
-
-# ── Éditeurs / OS ────────────────────────────────────
+# ── Éditeurs / OS ───────────────────────────────────
 .vscode/
 .DS_Store
 Thumbs.db
